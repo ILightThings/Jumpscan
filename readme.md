@@ -3,10 +3,15 @@
 A quick golang port scanner that can be compiled and dropped onto a victim machine for a quick portscan. 
 
 
-
 I needed the for an engagment that had multiple vlans and a very protective EDR. 
 
 ---
+To build for release:
+```
+ go build -o JumpScan.exe -ldflags '-s' main.go 
+```
+---
+## Usage
 ```
 usage: Jumpscan [-h|--help] -p|--ports "<value>" -t|--target "<value>"
                 [-T|--timeout <integer>]
