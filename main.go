@@ -7,6 +7,7 @@ import (
 	"github.com/go-playground/validator"
 	"log"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"strconv"
@@ -21,22 +22,26 @@ import (
 //}
 
 type targetHost struct {
-	Ipaddr   string
-	Hostname string
-	Ports    []int
+	Ipaddr    string
+	Hostname  string
+	Ports     []int
+	HttpPorts []int
 }
 
 type options struct {
-	hosts   []string
-	ports   []int
-	timeout int64 //Seconds
+	hosts     []string
+	ports     []int
+	timeout   int64 //Seconds
+	Httpcheck bool
 }
 
 func main() {
 	parser := argparse.NewParser("Jumpscan", "A quick, concurrent port scanner, that can be dropped onto a victem machine and ran.")
+	httpccheckarg := parser.Flag("H", "HTTP", &argparse.Options{Help: "Check with HTTP(S) GET. Useful for when firewall says that the port is open no matter what."})
 	portarg := parser.String("p", "ports", &argparse.Options{Required: true, Help: "TCP ports to scan. Single port, range, comma seperated"})
 	hostarg := parser.String("t", "target", &argparse.Options{Required: true, Help: "IPv4 to target. Single, CIDR, comma seperated"})
 	timeoutarg := parser.Int("T", "timeout", &argparse.Options{Required: false, Default: .5, Help: "Timeout in seconds"})
+
 	err := parser.Parse(os.Args)
 
 	valPorts, err := ParsePorts(*portarg)
@@ -49,11 +54,38 @@ func main() {
 	}
 
 	args := options{ports: valPorts,
-		hosts:   valHost,
-		timeout: int64(*timeoutarg)}
+		hosts:     valHost,
+		timeout:   int64(*timeoutarg),
+		Httpcheck: *httpccheckarg,
+	}
 
 	startScan(&args)
 
+}
+
+func HttpMethodCheck(port int, host string, opt *options) bool {
+	client := http.Client{
+		Timeout: time.Duration(opt.timeout) * time.Second,
+	}
+	httphost := fmt.Sprintf("http://%s:%d", host, port)
+	httpshoist := fmt.Sprintf("https://%s:%d", host, port)
+
+	_, err := client.Get(httphost)
+	if err != nil {
+		_, err = client.Get(httpshoist)
+
+		if err == nil {
+			fmt.Printf("HTTPS Found %s\n", httpshoist)
+			return true
+		}
+		return false
+	} else {
+		fmt.Printf("HTTP Found %s\n", httphost)
+		return true
+
+	}
+
+	return false
 }
 
 func Cidr(cidr string) ([]string, error) {
@@ -172,6 +204,7 @@ func ParseHost(host string) ([]string, error) {
 }
 
 func startScan(options *options) {
+
 	var allhosts []targetHost
 	var WAIT sync.WaitGroup
 
@@ -196,6 +229,11 @@ func startScan(options *options) {
 			for p := range allhosts[ahost].Ports {
 				fmt.Printf("\tPort %d Open\n", allhosts[ahost].Ports[p])
 			}
+			if options.Httpcheck {
+				for h := range allhosts[ahost].HttpPorts {
+					fmt.Printf("\tHTTP Get :%d Worked\n", allhosts[ahost].HttpPorts[h])
+				}
+			}
 		}
 	}
 	fmt.Printf("Scan Finished \n")
@@ -215,6 +253,13 @@ func scanTarget(host string, options *options) targetHost {
 			status := scanport(port, host, options.timeout)
 			if status {
 				t.Ports = append(t.Ports, port)
+				if options.Httpcheck {
+					httpcheckbool := HttpMethodCheck(port, host, options)
+					if httpcheckbool {
+						t.HttpPorts = append(t.HttpPorts, port)
+					}
+				}
+
 			}
 		}(y)
 
